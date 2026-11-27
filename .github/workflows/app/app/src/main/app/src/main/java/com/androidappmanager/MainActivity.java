@@ -3,27 +3,31 @@ package com.androidappmanager;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.content.pm.PackageInfo;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.view.Gravity;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends Activity {
 
     private TextView status;
     private Button stopButton;
 
-    private final String[] apps = {
-        "com.openai.chatgpt",
-        "ir.eitaa.messenger",
-        "com.farsitel.bazaar",
-        "com.google.android.apps.nbu.files",
-        "com.google.android.apps.searchlite",
-        "com.sec.android.app.samsungapps",
-        "com.android.vending",
-        "com.aparat.filimo",
-        "ir.filmnet.android"
+    private static final String[] EXCLUDED = {
+        "com.agah.asatrader",
+        "com.precision.loopclicker",
+        "com.androidappmanager"
+    };
+
+    private static final String[] EXTRA_APPS = {
+        "com.termux",
+        "com.topjohnwu.magisk"
     };
 
     @Override
@@ -60,51 +64,102 @@ public class MainActivity extends Activity {
         setContentView(layout);
     }
 
+    private boolean excluded(String pkg) {
+        for (String item : EXCLUDED) {
+            if (item.equals(pkg)) return true;
+        }
+        return false;
+    }
+
     private void stopApps() {
         stopButton.setEnabled(false);
-        status.setText("در حال توقف برنامه‌ها...");
+        status.setText("در حال شناسایی و توقف برنامه‌ها...");
 
         new Thread(() -> {
-            StringBuilder result = new StringBuilder();
-            int success = 0;
+            List<String> apps = new ArrayList<>();
+            PackageManager pm = getPackageManager();
 
             try {
-                for (String pkg : apps) {
-                    Process process = new ProcessBuilder(
-                        "su", "-c", "am force-stop " + pkg
-                    ).redirectErrorStream(true).start();
+                List<PackageInfo> installed =
+                    pm.getInstalledPackages(PackageManager.GET_PERMISSIONS);
 
-                    java.io.BufferedReader reader =
-                        new java.io.BufferedReader(
-                            new java.io.InputStreamReader(
-                                process.getInputStream()
-                            )
-                        );
+                for (PackageInfo info : installed) {
+                    String pkg = info.packageName;
 
-                    while (reader.readLine() != null) {
+                    if (excluded(pkg)) continue;
+
+                    if ((info.applicationInfo.flags &
+                        ApplicationInfo.FLAG_SYSTEM) != 0) continue;
+
+                    boolean hasInternet = false;
+
+                    if (info.requestedPermissions != null) {
+                        for (String permission : info.requestedPermissions) {
+                            if ("android.permission.INTERNET".equals(permission)) {
+                                hasInternet = true;
+                                break;
+                            }
+                        }
                     }
 
-                    int code = process.waitFor();
+                    if (hasInternet) apps.add(pkg);
+                }
 
-                    if (code == 0) {
-                        success++;
-                        result.append("متوقف شد: ").append(pkg).append("\n");
-                    } else {
-                        result.append("خطا: ").append(pkg).append("\n");
+                for (String pkg : EXTRA_APPS) {
+                    if (!excluded(pkg) && !apps.contains(pkg)) {
+                        apps.add(pkg);
                     }
                 }
+
+                int success = 0;
+                StringBuilder result = new StringBuilder();
+
+                for (String pkg : apps) {
+                    try {
+                        Process process = new ProcessBuilder(
+                            "su", "-c", "am force-stop " + pkg
+                        ).redirectErrorStream(true).start();
+
+                        java.io.BufferedReader reader =
+                            new java.io.BufferedReader(
+                                new java.io.InputStreamReader(
+                                    process.getInputStream()
+                                )
+                            );
+
+                        while (reader.readLine() != null) {}
+
+                        int code = process.waitFor();
+
+                        if (code == 0) {
+                            success++;
+                            result.append("متوقف شد: ")
+                                .append(pkg).append("\n");
+                        } else {
+                            result.append("خطا: ")
+                                .append(pkg).append("\n");
+                        }
+                    } catch (Exception e) {
+                        result.append("خطا: ")
+                            .append(pkg).append("\n");
+                    }
+                }
+
+                final String message =
+                    "تعداد توقف موفق: " + success + " از " +
+                    apps.size() + "\n\n" + result;
+
+                runOnUiThread(() -> {
+                    status.setText(message);
+                    stopButton.setEnabled(true);
+                });
+
             } catch (Exception e) {
-                result.append("خطا: ").append(e.getMessage());
+                runOnUiThread(() -> {
+                    status.setText("خطا: " + e.getMessage());
+                    stopButton.setEnabled(true);
+                });
             }
-
-            final String message =
-                "تعداد توقف موفق: " + success + " از " + apps.length
-                + "\n\n" + result;
-
-            runOnUiThread(() -> {
-                status.setText(message);
-                stopButton.setEnabled(true);
-            });
         }).start();
     }
 }
