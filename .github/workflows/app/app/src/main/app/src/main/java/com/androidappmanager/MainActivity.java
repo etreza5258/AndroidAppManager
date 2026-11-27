@@ -27,7 +27,8 @@ public class MainActivity extends Activity {
 
     private static final String[] EXTRA_APPS = {
         "com.termux",
-        "com.topjohnwu.magisk"
+        "com.topjohnwu.magisk",
+        "com.android.chrome"
     };
 
     @Override
